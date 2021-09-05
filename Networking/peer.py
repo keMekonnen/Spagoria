@@ -4,29 +4,26 @@ import traceback
 import time 
 from colorama.ansi import Fore # to make the debugging look ~nice
 import pickle
+from pynput.keyboard import Listener
+
+"""
+BIG TODO 's
+Testing
+"""
 
 #Local Imports
-from peerconnection import PeerAuth, PeerConnection
-
-class RecvdPeer:
-    # NOTE idk what this is yet just bear with me yo
-    def __init__(self, peerconn: PeerConnection):
-        host = peerconn.host
-        port = peerconn.port
-        self.address=(host, port)
-        self.id = peerconn.id
-        Auth = PeerAuth(self) #This class doesnt exist yet, ik ik ... TODO(keMekonnen)
-        # self.DH = (Auth.sharedPrime, Auth.sharedBase) 
-        ######################### Which is best, should we stick with basic Diffie-Hellman or should we allow for other options to be devd? Find out next time on Total Dramaaa IsllAANDDD!!!
-        # self.DH = (Auth.dh.sharedPrime, Auth.dh.sharedBase) 
+from peerconnection import PeerConnection
+from errors import PeerLimitExceeded
+from shrtHand import AuthPass
 
 
 class Peer:
     """
     Dundr Methods
     """
-    def __init__(self, debug, serverport, allocatedMem=50, allocatedCPU=25, allocatedROM=50, local=False, myid=None, serverhost=None, maxpeers=5):
+    def __init__(self, debug, serverport, allocatedMem=50, allocatedCPU=25, allocatedROM=50, local=False, myid=None, serverhost=None, maxpeers=15):
         self.peeradd = False
+        self.s = self.makeserversocket( self.serverport )
         self.doDebug = debug # boolean to decide wether or not there will be debugging will be active
         self.maxpeers = int(maxpeers) # limits the number of peers that can connect to a node
         self.errs = {1: 'Incorrect Message type provided'} # dict of all the different types of peers
@@ -44,12 +41,9 @@ class Peer:
             self.myid = str('%s:%d' % (self.serverhost, self.serverport))
 
         self.workTypes = {}
-        self.handlers = {'PING': self.pingHandle, 'PRNT': self.prntHandle, 'SRRY': self.missFail}
-        self.peers = [{},{},{}]         #list of dicts for all the peers that this peer can connect to. 
-                                         #peers[0] is a dict of Routing Nodes that are authorized to assign work, and add new routing nodes, must not be empty #NOTE idk what a routing node is too
-                                         #peers[1] is a dict of nodes assigned with a BCNN task with this node, can be empty
-                                         #peers[2] is a dict of nodes asigned with a CBWH task with this node, can be empty
-                 #NOTE ^^^^^ This may ultimately be a useless, considering ive had it in here for the past two weeks and did nothing with them...
+        self.handlers = {'PING': self.pingHandle, 'PRNT': self.prntHandle, 'SRRY': self.missFail, 'STRG': self.strgHandle}
+        self.peers = {}   
+        self.peercount = len(self.peers)
         self.shutdown = False  #bool over wether or not the node should shut down
         self.allocatedMem = allocatedMem #RAM allocated for the node, sets limit for how much the node can use before deleting subroccess, threads, work etc. In Megabytes
         self.allocatedCPU = allocatedCPU #Permitted cpu usage percentage sets limit for how much the node can use before deleting subroccess, threads, work etc. In Percentage
@@ -61,26 +55,45 @@ class Peer:
     """
     Handlers
     """
-    def srryHandle(self, peerconn, msgdata):
+    def missFail(self, peerconn, msgdata):
         self.debug('There has been an error with : '+Fore.YELLOW+str(peerconn)+Fore.WHITE+Fore.RED +" "+msgdata + Fore.WHITE)
     def pingHandle(self, peerconn, msgdata):
         pass  
     def prntHandle(self, peerconn, msgdata):
-        self.debug(str(peerconn)+' says: '+msgdata) #prints out the sent message #NOTE just realized how pointless this comment is
-    def workHandle(self, peerconn, msgdata):
-        try:
-            if not self.occupied:
-                recvP = RecvdPeer(peerconn)
-                #TODO(keMekonnen) Stop fcking procrastinating and fix this
-            else:
-                self.srryHandle(peerconn, 'Peer is already working')    
-        except:
-            self.srryHandle(peerconn, 'Work Handling Failed')
-            if self.doDebug:
-                traceback.print_exc()
+        self.debug(str(peerconn)+' says: '+msgdata)
+    def strgHandle(self, peerconn, msgdata):
+        p = pickle.loads(msgdata)
+        if type(p) == "<class 'peerconnection.PickleJar'>":
+            try:
+                if not self.occupied:
+                    PeerHands = []
+                    for i in p.pickles:
+                        i = pickle.loads(i)
+                        PeerHands.append(i)
+                    cStorage = self.cloudStorage(PeerHands[0], PeerHands[1], PeerHands[2: len(PeerHands)])
+                    self.occupied = True
+                    try: 
+                        cStorage.run(self.s)
+                    except:
+                        addon = ''
+                        if self.doDebug: traceback.print_exc()
+                        else: addon += Fore.YELLOW +' set debug to True for details' + Fore.WHITE
+                        self.missFail(peerconn, 'Faliure handling work'+addon)
+                    finally:
+                        self.occupied = False
+                        self.prntHandle(peerconn, 'Storage Job completed')
+
+                else:
+                    self.missFail(peerconn, 'Peer is already working')    
+            except:
+                addon = ''
+                if self.doDebug: traceback.print_exc()
+                else: addon += Fore.YELLOW +' set debug to True for details' + Fore.WHITE
+                self.missFail(peerconn, 'Faliure handling work'+addon)
     """
     Misc. Methods
     """
+    
     def debug(self, inp):
         #fancy print function, mostly useless, aesthetically pleasing
         if self.doDebug:
@@ -100,6 +113,23 @@ class Peer:
         self.serverhost = s.getsockname()[0]
         s.close()
     """
+    Keyboard listener Methods
+    """
+    def listener(self):
+        def actions( key):
+            if str(key) == "Key.ctrl_l":
+                self.debug("Keyboard listener exiting...")
+                self.shutdown = True
+                return False
+        def runListener():  
+            # Collect all event until released
+            self.debug("Keyboard listener initating...")
+            self.debug("    press ctrl to shut the program down")
+            with Listener(on_press = actions) as listener:
+                listener.join()
+        t = threading.Thread(target=runListener)
+        t.start()
+    """
     Stabilization Methods    
     """
     def stabilize(self):
@@ -108,23 +138,27 @@ class Peer:
         def stabilizer():
             todelete = []
             self.peeradd = False
-            for pid in self.peers:
-                try:
-                    self.debug( 'Check live %s' % pid )
-                    host, port = self.peers[pid]
-                    peerconn = PeerConnection(pid, host, port)
-                    peerconn.senddata( 'PING', {} )
-                except:
-                    self.debug('%s is not live' % str(pid))
-                    todelete.append(pid)
-                try:
-                    for pid in todelete: 
-                        if pid in self.peers: del self.peers[pid]
-                finally:
-                    if peerconn:
-                        peerconn.close()
+            try:
+                for pid in self.peers:
+                    try:
+                        self.debug( 'Check live %s' % pid )
+                        host, port = self.peers[pid]
+                        peerconn = PeerConnection(pid, host, port)
+                        peerconn.senddata( 'PING', {} )
+                    except:
+                        self.debug('%s is not live' % str(pid))
+                        todelete.append(pid)
+                        peerconn = False
+                    try:
+                        for pid in todelete: 
+                            if pid in self.peers: del self.peers[pid]
+                    finally:
+                        if peerconn:
+                            peerconn.close()
+            except RuntimeError:
+                stabilizer()
             self.peeradd = True
-        def runstabilzer(delay=45.0):
+        def runstabilzer(delay=15.0):
             while not self.shutdown:
                 time.sleep(delay)
                 stabilizer()
@@ -135,11 +169,17 @@ class Peer:
         hpTuple = (host, port)
         def runaddpeer(hpTuple, pid):
             try:
-                if self.peeradd:
+                if self.peeradd and self.maxpeers > self.peercount:
                     self.peers[pid] = hpTuple
+                    self.peercount = len(self.peers)
+                    return True
+                elif not self.peeradd and self.maxpeers > self.peercount:
+                    time.sleep(2)
+                    runaddpeer(hpTuple, pid)
                     return True
                 else:
-                    runaddpeer(hpTuple, pid)
+                    raise PeerLimitExceeded("The number of connected peers cannot surpass the set limit")
+
             except:
                 if self.doDebug:
                     traceback.print_exc()
@@ -151,19 +191,25 @@ class Peer:
     """
     def mainloop(self, debug):
         #creates the loop that listens for new connections
-        s = self.makeserversocket( self.serverport )
         self.debug( 'Server started: %s (%s:%d)' % ( self.myid, self.serverhost, self.serverport ) )
+        self.listener()
         self.stabilize()
-        while not self.shutdown:
+        displayedPause = 0
+        while not self.shutdown :
             try:
-                s.listen()
-                self.debug( 'Listening for connections...' )
-                clientsock, clientaddr = s.accept()
-                self.debug('Connected to: %s' % (clientaddr))
-                clientsock.settimeout(None)
-                t = threading.Thread( target = self.handlepeer, args = [ clientsock, debug ] )
-                t.start()
-            except KeyboardInterrupt: #TODO(keMekonnen) figure out why this is not working
+                if not self.occupied:
+                    self.s.listen()
+                    self.debug( 'Listening for connections...' )
+                    clientsock, clientaddr = self.s.accept()
+                    self.debug('Connected to: %s' % (str(clientaddr)))
+                    clientsock.settimeout(None)
+                    t = threading.Thread( target = self.handlepeer, args = [ clientsock, debug ] )
+                    t.start()
+                else:
+                    if displayedPause == 0:
+                        self.debug('Work Recieved,  Mainloop Paused')
+                        displayedPause += 1
+            except KeyboardInterrupt:
                 print('KeyboardInterrupt: stopping mainloop')
                 self.shutdown = True
                 continue
@@ -172,12 +218,12 @@ class Peer:
                     traceback.print_exc()
                     continue
         self.debug( 'Main loop exiting' )
-        s.close()
+        self.s.close()
     def handlepeer(self, clientsock, debug):
         #This function is too annoying for me to bother explaining
         self.debug( 'Connected ' + str(clientsock.getpeername()))
         host, port = clientsock.getpeername()
-        peerconn = PeerConnection( None, host, port, clientsock, debug=debug )
+        peerconn = PeerConnection( host, port, sock=clientsock, debug=debug )
         self.addpeer(peerconn.id, host, port)
         try: 
             msg = peerconn.recvdata()
@@ -200,3 +246,10 @@ class Peer:
         except:
             if self.debug:
                 traceback.print_exc()
+
+# class cloudstorage():
+#     def __init__(self):
+#         self.handlers = {}
+#     """
+#     Handlers
+#     """

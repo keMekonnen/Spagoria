@@ -5,9 +5,7 @@ import pickle
 from colorama.ansi import Fore
 from random import random
 
-#Local Imports
-from peer import RecvdPeer
-
+# #Local Imports
 
 class messagedata:
         def __init__(self, msgtype: str, data: dict):
@@ -18,12 +16,12 @@ class messagedata:
                         return self.makemsgSTRG(inp["AuthMain"], inp["AuthSecondary"], inp["BackupDicts"])
                 elif self.msgtype == 'SRRY' or self.msgtype == 'PRNT':
                         return self.makemsgSTR(inp["strMsg"])
-                if self.msgtype == 'PING':
+                elif self.msgtype == 'PING':
                         return self.makemsgPING()
         def makemsgSTR(self, msg):
-                msg = self.msgtype+":"+str(msg) 
+                msg = self.msgtype+":"+str(msg)
                 return msg
-        def makemsgSTRG(self, AuthMain: RecvdPeer, AuthSecondary: RecvdPeer=None, BackupDicts={}):
+        def makemsgSTRG(self, AuthMain, AuthSecondary=None, BackupDicts={}):
                 pickles = []
                 pickledMain = pickle.dumps(AuthMain)
                 pickles.append(pickledMain)
@@ -41,12 +39,10 @@ class messagedata:
                 return msg
         def makemsgPING(self):
                 return self.msgtype+":"
-        def __str__(self) -> str:
-                return self.msg
 
 
 class PeerConnection:
-        def __init__( self, peerid, host, port, sock=None, debug=False ):
+        def __init__( self, host, port, sock=False, debug=False, peerid=None ):
                 if peerid:
                         self.id = peerid
                 else:
@@ -67,10 +63,10 @@ class PeerConnection:
         def makemsg(self, msgtype, msgdata: dict):
                 try:
                         if msgtype and len(msgtype) == 4:
-                                msg = str(messagedata(msgtype, msgdata))
+                                msg = messagedata(msgtype, msgdata).msg
                                 return msg
                         else:
-                                return 'SRRY:Improper msgtype provided'
+                                return "SRRY:Improper msgtype provided"
                 except:
                         addon = ''
                         if self.doDebug: traceback.print_exc()
@@ -78,11 +74,12 @@ class PeerConnection:
                         return 'SRRY:Faliure makingmsg'+addon
         def senddata(self, msgtype, msgdata: dict):
                 try:
-                        msg = self.makemsg(msgtype, msgdata) #TODO(keMekonnen) Figure out a way to standardize what goes in here. please dont use more classes
+                        msg = self.makemsg(msgtype, msgdata) #TODO(keMekonnen) Figure out a way to standardize what goes in here. please dont use more classes 
+                        print(msg)
                         l = str(len(msg)).encode()
                         self.s.send(l)
                         time.sleep(0.5)
-                        self.s.sendall(msg)
+                        self.s.sendall(msg.encode())
                 except:
                         addon = ''
                         if self.doDebug: traceback.print_exc()

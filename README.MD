@@ -13,4 +13,6 @@ Spagoria means to be a solution. The idea is simple: create a way for people to 
 
 Spagoria will be a hybrid p2p network based app that people can purchase computing power from. The money will be given fullly and absolutely to the nodes running the requested processes, to incentivise work to keep being done.
 
-The project is intended to be written in python, extensivelly utilising the socket module, but we are still at the very early stages of this project so other alternatives can be explored
+The project is intended to be written in python, extensivelly utilising the socket module, but we are still at the very early stages of this project so this is other alternatives can be explored
+
+website: https://spagoriastaticpage.uranianpotato.repl.co/
