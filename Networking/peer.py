@@ -4,6 +4,7 @@ import traceback
 import time 
 from colorama.ansi import Fore # to make the debugging look ~nice
 import pickle
+from multiprocessing import Process
 from pynput.keyboard import Listener
 
 """
@@ -23,11 +24,11 @@ class Peer:
     """
     def __init__(self, debug, serverport, allocatedMem=50, allocatedCPU=25, allocatedROM=50, local=False, myid=None, serverhost=None, maxpeers=15):
         self.peeradd = False
-        self.s = self.makeserversocket( self.serverport )
         self.doDebug = debug # boolean to decide wether or not there will be debugging will be active
         self.maxpeers = int(maxpeers) # limits the number of peers that can connect to a node
         self.errs = {1: 'Incorrect Message type provided'} # dict of all the different types of peers
         self.serverport = int(serverport) # port to run the server on
+        self.s = self.makeserversocket( self.serverport )
         if serverhost: # sets the server host for this node
             self.serverhost = serverhost
         else: 
@@ -97,8 +98,10 @@ class Peer:
     def debug(self, inp):
         #fancy print function, mostly useless, aesthetically pleasing
         if self.doDebug:
-            print ("[%s] %s" % ( str(threading.currentThread().getName()), inp))
-        self.prevdebugmsg = inp
+            try:
+                print ("[%s] %s" % ( str(threading.currentThread().getName()), inp))
+            except:
+                print(inp)
     def makeserversocket(self, port):
         #tintintin
         s = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
@@ -118,8 +121,9 @@ class Peer:
     def listener(self):
         def actions( key):
             if str(key) == "Key.ctrl_l":
-                self.debug("Keyboard listener exiting...")
+                self.debug("Peer shutting down ...")
                 self.shutdown = True
+                self.MainLoopProcces.terminate()
                 return False
         def runListener():  
             # Collect all event until released
@@ -192,9 +196,8 @@ class Peer:
     def mainloop(self, debug):
         #creates the loop that listens for new connections
         self.debug( 'Server started: %s (%s:%d)' % ( self.myid, self.serverhost, self.serverport ) )
-        self.listener()
-        self.stabilize()
         displayedPause = 0
+        self.stabilize()
         while not self.shutdown :
             try:
                 if not self.occupied:
@@ -219,6 +222,7 @@ class Peer:
                     continue
         self.debug( 'Main loop exiting' )
         self.s.close()
+    
     def handlepeer(self, clientsock, debug):
         #This function is too annoying for me to bother explaining
         self.debug( 'Connected ' + str(clientsock.getpeername()))
@@ -246,10 +250,3 @@ class Peer:
         except:
             if self.debug:
                 traceback.print_exc()
-
-# class cloudstorage():
-#     def __init__(self):
-#         self.handlers = {}
-#     """
-#     Handlers
-#     """
