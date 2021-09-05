@@ -1,0 +1,2 @@
+class PeerLimitExceeded(Exception):
+    pass
