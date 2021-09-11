@@ -1,6 +1,18 @@
+import threading
+import traceback
+from peerconnection import PeerConnection
+from colorama.ansi import Fore
 from peer import Peer
 from multiprocessing import Process
 from pynput.keyboard import Listener
+
+
+"""
+TODO's
+-peer verification |P|
+-maxpeer control |P|
+-connection rejection |p|
+"""
 
 def runpeer(peer: Peer, debug: bool):
     def listener(MP: Process):
@@ -9,20 +21,26 @@ def runpeer(peer: Peer, debug: bool):
                 print("Peer shutting down ...")
                 MP.terminate()
                 return False
+            if str(key) == "'s'":
+                if __name__ == '__main__':
+                    p = Process(target=peer.recCommand)
+                    p.start()
         def runListener():  
             # Collect all event until released
             print("Keyboard listener initating...")
             print("    press ctrl to shut the program down")
-            with Listener(on_press = actions) as listener:
-                listener.join()
+            listener = Listener(on_press = actions)
+            listener.start()
         runListener()
     if __name__ == '__main__':
         MP = Process(target=peer.mainloop, args=(debug,))
         MP.start()
         listener(MP=MP)
+if __name__ == '__main__':
+    local = input("local[y/n]:")
+    if local == 'y':
+        local = True
     else:
-        print(__name__)
-
-    
-peer = Peer(True, 5505, local=True)
-runpeer(peer, True)
+        local = False
+    peer = Peer(True, 5512, local=local)
+    runpeer(peer, True)

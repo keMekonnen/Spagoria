@@ -5,15 +5,13 @@ import pickle
 from colorama.ansi import Fore
 from random import random
 
-# #Local Imports
-
 class messagedata:
         def __init__(self, msgtype: str, data: dict):
                 self.msgtype = msgtype.upper()
                 self.msg = self.createmsgdata(data)
         def createmsgdata(self, inp: dict):
                 if self.msgtype == 'STRG':        
-                        return self.makemsgSTRG(inp["AuthMain"], inp["AuthSecondary"], inp["BackupDicts"])
+                        return self.makemsgSTRG(inp["file"], inp["fileName"])
                 elif self.msgtype == 'SRRY' or self.msgtype == 'PRNT':
                         return self.makemsgSTR(inp["strMsg"])
                 elif self.msgtype == 'PING':
@@ -21,19 +19,10 @@ class messagedata:
         def makemsgSTR(self, msg):
                 msg = self.msgtype+":"+str(msg)
                 return msg
-        def makemsgSTRG(self, AuthMain, AuthSecondary=None, BackupDicts={}):
+        def makemsgSTRG(self, data, name):
                 pickles = []
-                pickledMain = pickle.dumps(AuthMain)
-                pickles.append(pickledMain)
-                if AuthSecondary:
-                        pickledBackup = pickle.dumps(AuthSecondary)
-                        pickles.append(pickledBackup)
-                if len(BackupDicts)>0:
-                        for i in BackupDicts:
-                                ell = BackupDicts[i]
-                                if type(ell) == "<class '__main__.RecvdPeer'>":
-                                        pickledEll = pickle.dumps(ell)
-                                        pickles.append(pickledEll)
+                pickles.append(data)
+                pickles.append(name)
                 jar = PickleJar(pickles)
                 msg = self.msgtype+":"+pickle.dumps(jar)
                 return msg
@@ -74,8 +63,7 @@ class PeerConnection:
                         return 'SRRY:Faliure makingmsg'+addon
         def senddata(self, msgtype, msgdata: dict):
                 try:
-                        msg = self.makemsg(msgtype, msgdata) #TODO(keMekonnen) Figure out a way to standardize what goes in here. please dont use more classes 
-                        print(msg)
+                        msg = self.makemsg(msgtype, msgdata)
                         l = str(len(msg)).encode()
                         self.s.send(l)
                         time.sleep(0.5)
@@ -87,8 +75,9 @@ class PeerConnection:
                         return 'SRRY:Failure sending data'+addon
         def recvdata(self):
                 try:
-                        l = self.s.recv(1024).decode()
+                        l = self.s.recv(1024).decode() # this may be a problem in the future, but if file's size is to big to recive with 2k bytes, fuck it
                         msg = self.s.recv(int(l)).decode()
+                        time.sleep(0.5)
                         return msg
                 except:
                         addon = ''

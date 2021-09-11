@@ -2,30 +2,29 @@ import threading
 import socket
 import traceback 
 import time 
-from colorama.ansi import Fore # to make the debugging look ~nice
+from colorama.ansi import Fore
 import pickle
-from multiprocessing import Process
 from pynput.keyboard import Listener
+from hashlib import sha256
+from Crypto.Cipher import AES
 
 """
 BIG TODO 's
-Testing
+And handlers for cloud storage with appropriate checks and balances
 """
 
 #Local Imports
-from peerconnection import PeerConnection
-from errors import PeerLimitExceeded
-from shrtHand import AuthPass
-
+from peerconnection import PeerConnection, PickleJar
 
 class Peer:
     """
     Dundr Methods
     """
-    def __init__(self, debug, serverport, allocatedMem=50, allocatedCPU=25, allocatedROM=50, local=False, myid=None, serverhost=None, maxpeers=15):
+    def __init__(self, debug, serverport, allocatedMem=50, allocatedCPU=25, allocatedROM=50, local=False, myid=None, serverhost=None, maxpeers: int=15):
         self.peeradd = False
         self.doDebug = debug # boolean to decide wether or not there will be debugging will be active
         self.maxpeers = int(maxpeers) # limits the number of peers that can connect to a node
+        self.peerlimitreached = False # bool of wether or not the limit of peers is reached
         self.errs = {1: 'Incorrect Message type provided'} # dict of all the different types of peers
         self.serverport = int(serverport) # port to run the server on
         self.s = self.makeserversocket( self.serverport )
@@ -42,9 +41,8 @@ class Peer:
             self.myid = str('%s:%d' % (self.serverhost, self.serverport))
 
         self.workTypes = {}
-        self.handlers = {'PING': self.pingHandle, 'PRNT': self.prntHandle, 'SRRY': self.missFail, 'STRG': self.strgHandle}
+        self.handlers = {'PING': self.pingHandle, 'PRNT': self.prntHandle, 'SRRY': self.missFail, 'STRG': self.strgHandle, 'AUTH': self.authHandle}
         self.peers = {}   
-        self.peercount = len(self.peers)
         self.shutdown = False  #bool over wether or not the node should shut down
         self.allocatedMem = allocatedMem #RAM allocated for the node, sets limit for how much the node can use before deleting subroccess, threads, work etc. In Megabytes
         self.allocatedCPU = allocatedCPU #Permitted cpu usage percentage sets limit for how much the node can use before deleting subroccess, threads, work etc. In Percentage
@@ -62,8 +60,15 @@ class Peer:
         pass  
     def prntHandle(self, peerconn, msgdata):
         self.debug(str(peerconn)+' says: '+msgdata)
+    def authHandle(self, peerconn, msgdata):
+        pass
     def strgHandle(self, peerconn, msgdata):
-        p = pickle.loads(msgdata)
+        try:
+            p: PickleJar = pickle.loads(msgdata)
+        except:
+            p = pickle.loads(msgdata)
+            if self.doDebug:
+                self.doDebug(Fore.YELLOW + "Warning: PickleJar not recieved for strgHandle"+ Fore.WHITE)
         if type(p) == "<class 'peerconnection.PickleJar'>":
             try:
                 if not self.occupied:
@@ -71,7 +76,7 @@ class Peer:
                     for i in p.pickles:
                         i = pickle.loads(i)
                         PeerHands.append(i)
-                    cStorage = self.cloudStorage(PeerHands[0], PeerHands[1], PeerHands[2: len(PeerHands)])
+                    cStorage = self.runstorage(PeerHands[0])
                     self.occupied = True
                     try: 
                         cStorage.run(self.s)
@@ -90,16 +95,24 @@ class Peer:
                 addon = ''
                 if self.doDebug: traceback.print_exc()
                 else: addon += Fore.YELLOW +' set debug to True for details' + Fore.WHITE
-                self.missFail(peerconn, 'Faliure handling work'+addon)
+                self.missFail(peerconn, 'Faliure handling storage request '+addon)
+    """
+    Storage Methods
+    """
+    def runstorage():
+        pass
     """
     Misc. Methods
     """
     
-    def debug(self, inp):
+    def debug(self, inp, err:bool=False):
         #fancy print function, mostly useless, aesthetically pleasing
         if self.doDebug:
             try:
-                print ("[%s] %s" % ( str(threading.currentThread().getName()), inp))
+                if err:
+                    print ("[%s] %s" % ( str(threading.currentThread().getName()), Fore.RED + "Err: "+inp+ Fore.WHITE))
+                else:
+                    print ("[%s] %s" % ( str(threading.currentThread().getName()), inp))
             except:
                 print(inp)
     def makeserversocket(self, port):
@@ -115,24 +128,6 @@ class Peer:
         s.connect(('google.com', 80))
         self.serverhost = s.getsockname()[0]
         s.close()
-    """
-    Keyboard listener Methods
-    """
-    def listener(self):
-        def actions( key):
-            if str(key) == "Key.ctrl_l":
-                self.debug("Peer shutting down ...")
-                self.shutdown = True
-                self.MainLoopProcces.terminate()
-                return False
-        def runListener():  
-            # Collect all event until released
-            self.debug("Keyboard listener initating...")
-            self.debug("    press ctrl to shut the program down")
-            with Listener(on_press = actions) as listener:
-                listener.join()
-        t = threading.Thread(target=runListener)
-        t.start()
     """
     Stabilization Methods    
     """
@@ -161,7 +156,8 @@ class Peer:
                             peerconn.close()
             except RuntimeError:
                 stabilizer()
-            self.peeradd = True
+            if len(self.peers) < self.maxpeers:
+                self.peeradd = True
         def runstabilzer(delay=15.0):
             while not self.shutdown:
                 time.sleep(delay)
@@ -173,16 +169,18 @@ class Peer:
         hpTuple = (host, port)
         def runaddpeer(hpTuple, pid):
             try:
-                if self.peeradd and self.maxpeers > self.peercount:
+                if len(self.peers) < self.maxpeers:
+                    if not self.peerlimitreached:
+                        self.debug("Max peer limit reached. Connection with |"+ str(hpTuple)+"| has failed", err= True)
+                    self.peerlimitreached = True
+                elif self.peeradd and self.maxpeers > len(self.peers):
                     self.peers[pid] = hpTuple
-                    self.peercount = len(self.peers)
                     return True
-                elif not self.peeradd and self.maxpeers > self.peercount:
+                elif not self.peeradd and len(self.peers) < self.maxpeers:
                     time.sleep(2)
                     runaddpeer(hpTuple, pid)
                     return True
-                else:
-                    raise PeerLimitExceeded("The number of connected peers cannot surpass the set limit")
+    
 
             except:
                 if self.doDebug:
@@ -212,10 +210,6 @@ class Peer:
                     if displayedPause == 0:
                         self.debug('Work Recieved,  Mainloop Paused')
                         displayedPause += 1
-            except KeyboardInterrupt:
-                print('KeyboardInterrupt: stopping mainloop')
-                self.shutdown = True
-                continue
             except:
                 if self.doDebug:
                     traceback.print_exc()
@@ -223,7 +217,7 @@ class Peer:
         self.debug( 'Main loop exiting' )
         self.s.close()
     
-    def handlepeer(self, clientsock, debug):
+    def handlepeer(self, clientsock: socket, debug):
         #This function is too annoying for me to bother explaining
         self.debug( 'Connected ' + str(clientsock.getpeername()))
         host, port = clientsock.getpeername()
@@ -250,3 +244,44 @@ class Peer:
         except:
             if self.debug:
                 traceback.print_exc()
+    """
+    Command Recognition Methods
+    """
+    def recCommand(self):
+        try:
+            msgargs = {'PRNT': self.prnt, 'STRG': self.strg}
+            lines = open('./inputFile.txt', 'r').readlines()
+            print(lines)
+            msgtype = lines[0][:-1]
+            msgtype = msgtype.upper()
+            if msgtype not in msgargs:
+                print(Fore.RED+ "there is no message type called: ", msgtype+ Fore.WHITE)
+                return False
+            msgdata = msgargs[msgtype](lines=lines)
+            if msgdata == list(msgdata):
+                msgdata = msgdata[0]
+            host = (lines[-2])[0:-1]
+            port = int(lines[-1])
+            print((host, port))
+            peerconn = PeerConnection(host, port)
+            peerconn.senddata(msgtype, msgdata)
+        except :
+            if self.doDebug:
+                traceback.print_exc()
+            return False
+        return msgtype
+    def prnt(self, lines:list):
+        inpMessage = lines[1][-1]
+        return {"strMsg": inpMessage}
+    def strg(self, lines:list):
+        file_path = input("file path:")
+        try:
+            fl = open(file_path, 'rb')
+            key = sha256(input("password:").encode()).digest()
+            f = fl.read()
+            cipher = AES.new(key, AES.MODE_EAX)
+            nonce = cipher.nonce
+            ciphertext, tag = cipher.encrypt_and_digest(f)
+            return [{'file': ciphertext}, [nonce, tag]]
+        except FileNotFoundError:
+            print(Fore.RED+ "there is no file called: ", file_path+ Fore.WHITE)
