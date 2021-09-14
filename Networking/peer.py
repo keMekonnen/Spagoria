@@ -24,6 +24,7 @@ class Peer:
         self.peeradd = False
         self.doDebug = debug # boolean to decide wether or not there will be debugging will be active
         self.maxpeers = int(maxpeers) # limits the number of peers that can connect to a node
+        self.full = False
         self.peerlimitreached = False # bool of wether or not the limit of peers is reached
         self.errs = {1: 'Incorrect Message type provided'} # dict of all the different types of peers
         self.serverport = int(serverport) # port to run the server on
@@ -97,11 +98,6 @@ class Peer:
                 else: addon += Fore.YELLOW +' set debug to True for details' + Fore.WHITE
                 self.missFail(peerconn, 'Faliure handling storage request '+addon)
     """
-    Storage Methods
-    """
-    def runstorage():
-        pass
-    """
     Misc. Methods
     """
     
@@ -169,7 +165,7 @@ class Peer:
         hpTuple = (host, port)
         def runaddpeer(hpTuple, pid):
             try:
-                if len(self.peers) < self.maxpeers:
+                if len(self.peers) > self.maxpeers:
                     if not self.peerlimitreached:
                         self.debug("Max peer limit reached. Connection with |"+ str(hpTuple)+"| has failed", err= True)
                     self.peerlimitreached = True
@@ -198,7 +194,7 @@ class Peer:
         self.stabilize()
         while not self.shutdown :
             try:
-                if not self.occupied:
+                if not self.occupied and not self.peerlimitreached:
                     self.s.listen()
                     self.debug( 'Listening for connections...' )
                     clientsock, clientaddr = self.s.accept()
@@ -237,7 +233,6 @@ class Peer:
                 msgdata = 'msgtype has not been provided by %s' % str(peerconn)
                 self.handlers[ msgtype ]( peerconn, msgdata )
             else:
-                self.debug( Fore.BLUE + 'Handling peer msg: %s' % msgtype + '' + Fore.WHITE)
                 self.handlers[ msgtype ]( peerconn, msgdata )
         except KeyboardInterrupt:
             raise
@@ -249,8 +244,9 @@ class Peer:
     """
     def recCommand(self):
         try:
-            msgargs = {'PRNT': self.prnt, 'STRG': self.strg}
             lines = open('./inputFile.txt', 'r').readlines()
+            msgargs = {'PRNT': self.prnt, 'STRG': self.strg, 'PING':self.ping}
+            
             print(lines)
             msgtype = lines[0][:-1]
             msgtype = msgtype.upper()
@@ -265,13 +261,14 @@ class Peer:
             print((host, port))
             peerconn = PeerConnection(host, port)
             peerconn.senddata(msgtype, msgdata)
+        except FileNotFoundError:
+            print(Fore.RED+"input file not found. make sure it is created and filled properly"+Fore.WHITE)
         except :
             if self.doDebug:
                 traceback.print_exc()
             return False
-        return msgtype
     def prnt(self, lines:list):
-        inpMessage = lines[1][-1]
+        inpMessage = str(lines[1])
         return {"strMsg": inpMessage}
     def strg(self, lines:list):
         file_path = input("file path:")
@@ -285,3 +282,5 @@ class Peer:
             return [{'file': ciphertext}, [nonce, tag]]
         except FileNotFoundError:
             print(Fore.RED+ "there is no file called: ", file_path+ Fore.WHITE)
+    def ping(self, lines):
+        return {'ping': None}
